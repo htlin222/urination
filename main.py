@@ -8,8 +8,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+import lameenc
 import pychromecast
+import sounddevice as sd
 import yaml
+from aiohttp import web
 from pyatv import connect, pair, scan
 from pyatv.const import DeviceState, Protocol
 
@@ -20,7 +23,6 @@ RECORD_FILE = Path(__file__).parent / "audio" / "_recording.wav"
 
 def record_audio(duration: int = 10, sample_rate: int = 44100) -> Path:
     """Record audio from microphone and save to file."""
-    import sounddevice as sd
     import soundfile as sf
 
     print(f"🎙️  Recording for {duration} seconds... (Press Ctrl+C to stop early)")
@@ -339,6 +341,246 @@ class GoogleCastStreamer(Streamer):
             return None
 
 
+class LiveBroadcaster:
+    """Real-time audio broadcasting from microphone via HTTP chunked MP3 stream."""
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        channels: int = 1,
+        bitrate: int = 128,
+        chunk_ms: int = 100,
+        port: int = 8765,
+    ):
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.bitrate = bitrate
+        self.chunk_ms = chunk_ms
+        self.port = port
+        self.broadcasting = False
+        self._app: web.Application | None = None
+        self._runner: web.AppRunner | None = None
+        self._encoder: lameenc.Encoder | None = None
+        self._audio_queue: asyncio.Queue | None = None
+
+    def _get_local_ip(self) -> str | None:
+        """Get the local IP address."""
+        import socket
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
+
+    def _setup_encoder(self) -> lameenc.Encoder:
+        """Setup MP3 encoder."""
+        encoder = lameenc.Encoder()
+        encoder.set_bit_rate(self.bitrate)
+        encoder.set_in_sample_rate(self.sample_rate)
+        encoder.set_channels(self.channels)
+        encoder.set_quality(2)  # 2=highest quality, 7=fastest
+        return encoder
+
+    async def _audio_capture_task(self) -> None:
+        """Capture audio from microphone and put into queue."""
+        chunk_size = int(self.sample_rate * self.chunk_ms / 1000)
+        loop = asyncio.get_event_loop()
+
+        def audio_callback(indata, frames, time_info, status):
+            if status:
+                print(f"⚠️  Audio status: {status}")
+            if self.broadcasting and self._audio_queue:
+                # Convert to bytes and encode to MP3
+                pcm_data = indata.tobytes()
+                mp3_chunk = self._encoder.encode(pcm_data)
+                if mp3_chunk:
+                    loop.call_soon_threadsafe(self._audio_queue.put_nowait, mp3_chunk)
+
+        with sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            dtype="int16",
+            blocksize=chunk_size,
+            callback=audio_callback,
+        ):
+            while self.broadcasting:
+                await asyncio.sleep(0.1)
+
+    async def _stream_handler(self, request: web.Request) -> web.StreamResponse:
+        """Handle HTTP request for live MP3 stream."""
+        response = web.StreamResponse()
+        response.content_type = "audio/mpeg"
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Connection"] = "keep-alive"
+        response.headers["Transfer-Encoding"] = "chunked"
+        await response.prepare(request)
+
+        print("📡 Client connected to live stream")
+
+        try:
+            while self.broadcasting:
+                try:
+                    # Wait for audio data with timeout
+                    mp3_chunk = await asyncio.wait_for(
+                        self._audio_queue.get(), timeout=1.0
+                    )
+                    await response.write(mp3_chunk)
+                except asyncio.TimeoutError:
+                    continue
+                except ConnectionResetError:
+                    break
+        except Exception as e:
+            print(f"⚠️  Stream error: {e}")
+        finally:
+            print("📴 Client disconnected")
+
+        return response
+
+    async def start_server(self) -> str:
+        """Start the HTTP streaming server. Returns the stream URL."""
+        self._encoder = self._setup_encoder()
+        self._audio_queue = asyncio.Queue(maxsize=100)
+
+        self._app = web.Application()
+        self._app.router.add_get("/live.mp3", self._stream_handler)
+
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+
+        site = web.TCPSite(self._runner, "0.0.0.0", self.port)
+        await site.start()
+
+        local_ip = self._get_local_ip()
+        stream_url = f"http://{local_ip}:{self.port}/live.mp3"
+        return stream_url
+
+    async def stop_server(self) -> None:
+        """Stop the HTTP streaming server."""
+        self.broadcasting = False
+        if self._encoder:
+            # Flush remaining data
+            self._encoder.flush()
+        if self._runner:
+            await self._runner.cleanup()
+
+    async def broadcast(
+        self, device: UnifiedDevice, credentials: str | None = None
+    ) -> None:
+        """Start live broadcasting to a device."""
+        print(f"🎙️  Starting live broadcast to {device.name}...")
+
+        # Start HTTP server
+        stream_url = await self.start_server()
+        print(f"📡 Stream URL: {stream_url}")
+
+        self.broadcasting = True
+
+        # Start audio capture in background
+        capture_task = asyncio.create_task(self._audio_capture_task())
+
+        # Give server time to start
+        await asyncio.sleep(0.5)
+
+        try:
+            if device.protocol == "airplay":
+                await self._broadcast_airplay(device, stream_url, credentials)
+            else:
+                await self._broadcast_googlecast(device, stream_url)
+        finally:
+            self.broadcasting = False
+            capture_task.cancel()
+            try:
+                await capture_task
+            except asyncio.CancelledError:
+                pass
+            await self.stop_server()
+
+    async def _broadcast_airplay(
+        self, device: UnifiedDevice, stream_url: str, credentials: str | None
+    ) -> None:
+        """Broadcast to AirPlay device."""
+        raw_device = device.raw_device
+
+        if not credentials:
+            print("⚠️  No credentials found. Run with --pair to authenticate.")
+            return
+
+        # Set credentials on services
+        for svc in raw_device.services:
+            if svc.protocol in (Protocol.AirPlay, Protocol.RAOP):
+                svc.credentials = credentials
+
+        print(f"📡 Connecting to {device.name}...")
+        atv = await connect(raw_device, asyncio.get_event_loop())
+
+        try:
+            print("🎵 Starting live stream...")
+            await atv.stream.stream_file(stream_url)
+
+            print("✅ Live broadcast started! Press Ctrl+C to stop.")
+            start_time = time.time()
+
+            while self.broadcasting:
+                elapsed = int(time.time() - start_time)
+                mins, secs = divmod(elapsed, 60)
+                print(f"\r🔴 LIVE {mins:02d}:{secs:02d}", end="", flush=True)
+                await asyncio.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\n⏹️  Broadcast stopped.")
+        finally:
+            atv.close()
+
+    async def _broadcast_googlecast(
+        self, device: UnifiedDevice, stream_url: str
+    ) -> None:
+        """Broadcast to Google Cast device."""
+        loop = asyncio.get_event_loop()
+
+        def play_stream():
+            chromecasts, browser = pychromecast.get_listed_chromecasts(
+                friendly_names=[device.name]
+            )
+            if not chromecasts:
+                print(f"❌ Device '{device.name}' not found.")
+                return None
+            cast = chromecasts[0]
+            cast.wait()
+            mc = cast.media_controller
+            mc.play_media(stream_url, "audio/mpeg")
+            mc.block_until_active(timeout=10)
+            browser.stop_discovery()
+            return cast
+
+        print(f"📡 Connecting to {device.name}...")
+        cast = await loop.run_in_executor(None, play_stream)
+
+        if not cast:
+            return
+
+        try:
+            print("✅ Live broadcast started! Press Ctrl+C to stop.")
+            start_time = time.time()
+
+            while self.broadcasting:
+                elapsed = int(time.time() - start_time)
+                mins, secs = divmod(elapsed, 60)
+                print(f"\r🔴 LIVE {mins:02d}:{secs:02d}", end="", flush=True)
+                await asyncio.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\n⏹️  Broadcast stopped.")
+        finally:
+            try:
+                cast.media_controller.stop()
+            except Exception:
+                pass
+
+
 def get_streamer(protocol: str, credentials: str | None = None) -> Streamer:
     """Factory function to get the appropriate streamer."""
     if protocol == "airplay":
@@ -578,6 +820,7 @@ Usage:
   python main.py --setup      # Force device setup
   python main.py --pair       # Pair with device (AirPlay only)
   python main.py --list       # List available devices
+  python main.py --live       # Live broadcast from microphone
   python main.py --record     # Record from mic and stream (default 10s)
   python main.py --record 30  # Record for 30 seconds
   python main.py <file.mp3>   # Stream specific file
@@ -678,6 +921,41 @@ async def main():
 
         # Stream the recording
         await stream_audio(config, audio_file)
+        return
+
+    # Handle --live
+    if "--live" in args:
+        config = load_config()
+        if not config:
+            print("⚙️  No device configured. Running setup first...\n")
+            config = await setup_device()
+            if not config:
+                print("Setup cancelled.")
+                return
+
+        device_id = config["device"]["id"]
+        device_name = config["device"]["name"]
+        protocol = config["device"].get("protocol", "airplay")
+        credentials = config["device"].get("credentials")
+
+        print(f"🔍 Looking for device: {device_name}...")
+
+        device = await find_device_by_id(device_id, protocol)
+        if not device:
+            device = await find_device_by_id(device_name, protocol)
+
+        if not device:
+            print(
+                f"❌ Device '{device_name}' not found. Run with --setup to reconfigure."
+            )
+            return
+
+        if protocol == "airplay" and not credentials:
+            print("⚠️  No credentials found. Run with --pair to authenticate.")
+            return
+
+        broadcaster = LiveBroadcaster()
+        await broadcaster.broadcast(device, credentials)
         return
 
     # Load or create config

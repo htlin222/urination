@@ -35,10 +35,22 @@ uv run python main.py              # Stream audio (setup if needed)
 uv run python main.py --setup      # Force device re-selection
 uv run python main.py --pair       # Pair with device (AirPlay only)
 uv run python main.py --list       # List available devices
+uv run python main.py --live       # Live broadcast from microphone
 uv run python main.py --record     # Record from mic and stream (10s default)
 uv run python main.py --record 30  # Record for 30 seconds
 uv run python main.py <file.mp3>   # Stream specific file
 uv run python main.py --help       # Show help
+```
+
+### Makefile shortcuts
+
+```bash
+make live     # Start live broadcast from microphone
+make record   # Record 10s from mic and stream
+make audio    # Stream audio file (interactive selection)
+make config   # Setup/configure device
+make pair     # Pair with AirPlay device
+make list     # List available devices
 ```
 
 ### First-time setup
@@ -77,6 +89,25 @@ uv run python main.py --record 30
 ```
 
 The recording shows a countdown timer and saves to `audio/_recording.wav` before streaming.
+
+### Live broadcast
+
+Stream your microphone in real-time to the device (like a PA system):
+
+```bash
+uv run python main.py --live
+# or
+make live
+```
+
+**How it works:**
+
+1. Captures audio from your microphone
+2. Encodes to MP3 in real-time using `lameenc`
+3. Serves via HTTP chunked transfer encoding
+4. Device plays the live stream (~2-3 seconds latency)
+
+Press `Ctrl+C` to stop broadcasting.
 
 ## Crontab setup
 
@@ -145,8 +176,13 @@ Uses **Strategy Pattern** for multi-protocol support:
 
 ```
 Streamer (ABC)
-├── AirPlayStreamer   # Apple devices via pyatv
+├── AirPlayStreamer    # Apple devices via pyatv
 └── GoogleCastStreamer # Google devices via pychromecast
+
+LiveBroadcaster        # Real-time microphone streaming
+├── HTTP Server (aiohttp) with chunked transfer
+├── MP3 Encoder (lameenc) for real-time encoding
+└── Audio Capture (sounddevice) from microphone
 ```
 
 ## Project structure
@@ -154,6 +190,7 @@ Streamer (ABC)
 ```
 urination/
 ├── main.py          # Main script with strategy pattern
+├── Makefile         # Convenient shortcuts
 ├── config.yml       # Device config (generated)
 ├── audio/           # Audio files directory
 │   └── .gitkeep
