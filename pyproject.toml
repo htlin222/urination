@@ -8,4 +8,6 @@ dependencies = [
     "pyatv>=0.16.1",
     "pychromecast>=14.0.9",
     "pyyaml>=6.0.3",
+    "sounddevice>=0.5.3",
+    "soundfile>=0.13.1",
 ]

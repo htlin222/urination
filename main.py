@@ -15,6 +15,48 @@ from pyatv.const import DeviceState, Protocol
 
 CONFIG_FILE = Path(__file__).parent / "config.yml"
 AUDIO_DIR = Path(__file__).parent / "audio"
+RECORD_FILE = Path(__file__).parent / "audio" / "_recording.wav"
+
+
+def record_audio(duration: int = 10, sample_rate: int = 44100) -> Path:
+    """Record audio from microphone and save to file."""
+    import sounddevice as sd
+    import soundfile as sf
+
+    print(f"🎙️  Recording for {duration} seconds... (Press Ctrl+C to stop early)")
+
+    try:
+        # Record audio
+        recording = sd.rec(
+            int(duration * sample_rate),
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16",
+        )
+
+        # Show countdown
+        for i in range(duration, 0, -1):
+            print(f"\r⏱️  {i:02d}s remaining", end="", flush=True)
+            sd.sleep(1000)
+
+        sd.wait()  # Wait for recording to finish
+        print("\r✅ Recording completed!    ")
+
+        # Save to file
+        RECORD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(RECORD_FILE), recording, sample_rate)
+
+        return RECORD_FILE
+
+    except KeyboardInterrupt:
+        sd.stop()
+        print("\n⏹️  Recording stopped early.")
+
+        # Save what we have
+        RECORD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(RECORD_FILE), recording, sample_rate)
+
+        return RECORD_FILE
 
 
 @dataclass
@@ -253,17 +295,20 @@ class GoogleCastStreamer(Streamer):
 
             # Wait for playback to complete
             start_time = time.time()
+            started_playing = False
             while not stop_event.is_set():
                 time.sleep(1)
                 elapsed = int(time.time() - start_time)
                 mins, secs = divmod(elapsed, 60)
                 print(f"\r⏱️  {mins:02d}:{secs:02d}", end="", flush=True)
-                if mc.status.player_state not in ("PLAYING", "BUFFERING", "IDLE"):
+
+                state = mc.status.player_state
+                if state == "PLAYING":
+                    started_playing = True
+                elif started_playing and state == "IDLE":
+                    # Finished playing
                     break
-                if (
-                    mc.status.player_state == "IDLE"
-                    and mc.status.idle_reason == "FINISHED"
-                ):
+                elif state not in ("PLAYING", "BUFFERING", "IDLE", "UNKNOWN"):
                     break
 
             print("\n✅ Playback completed.")
@@ -533,6 +578,8 @@ Usage:
   python main.py --setup      # Force device setup
   python main.py --pair       # Pair with device (AirPlay only)
   python main.py --list       # List available devices
+  python main.py --record     # Record from mic and stream (default 10s)
+  python main.py --record 30  # Record for 30 seconds
   python main.py <file.mp3>   # Stream specific file
 
 Supported devices:
@@ -605,6 +652,32 @@ async def main():
                 config["device"]["protocol"],
                 credentials,
             )
+        return
+
+    # Handle --record
+    if "--record" in args:
+        config = load_config()
+        if not config:
+            print("⚙️  No device configured. Running setup first...\n")
+            config = await setup_device()
+            if not config:
+                print("Setup cancelled.")
+                return
+
+        # Get duration from args (default 10 seconds)
+        duration = 10
+        record_idx = args.index("--record")
+        if record_idx + 1 < len(args):
+            try:
+                duration = int(args[record_idx + 1])
+            except ValueError:
+                pass
+
+        # Record audio
+        audio_file = record_audio(duration)
+
+        # Stream the recording
+        await stream_audio(config, audio_file)
         return
 
     # Load or create config

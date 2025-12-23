@@ -35,6 +35,8 @@ uv run python main.py              # Stream audio (setup if needed)
 uv run python main.py --setup      # Force device re-selection
 uv run python main.py --pair       # Pair with device (AirPlay only)
 uv run python main.py --list       # List available devices
+uv run python main.py --record     # Record from mic and stream (10s default)
+uv run python main.py --record 30  # Record for 30 seconds
 uv run python main.py <file.mp3>   # Stream specific file
 uv run python main.py --help       # Show help
 ```
@@ -61,6 +63,20 @@ uv run python main.py              # Stream audio
 Place audio files in the `./audio/` directory. Supported formats:
 
 - MP3, M4A, WAV, FLAC, AAC
+
+### Record and stream
+
+Record audio from your microphone and stream it to the device:
+
+```bash
+# Record 10 seconds (default) and stream
+uv run python main.py --record
+
+# Record 30 seconds and stream
+uv run python main.py --record 30
+```
+
+The recording shows a countdown timer and saves to `audio/_recording.wav` before streaming.
 
 ## Crontab setup
 
