@@ -19,6 +19,901 @@ from pyatv.const import DeviceState, Protocol
 CONFIG_FILE = Path(__file__).parent / "config.yml"
 AUDIO_DIR = Path(__file__).parent / "audio"
 RECORD_FILE = Path(__file__).parent / "audio" / "_recording.wav"
+WEB_PORT = 8080
+
+
+# ============================================================================
+# Web GUI HTML Template
+# ============================================================================
+
+WEB_HTML = """
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>🚽 小尿尿提醒</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 16px;
+            padding-bottom: 100px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--card);
+            border-radius: 20px;
+            font-size: 14px;
+            color: var(--text-muted);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .status-dot.offline { background: var(--danger); }
+        .status-dot.busy { background: var(--warning); animation: pulse 1s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .device-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 12px;
+        }
+
+        .device-icon {
+            font-size: 32px;
+        }
+
+        .device-details h3 {
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .device-details p {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text);
+        }
+
+        .btn-outline:hover {
+            background: var(--bg);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .btn-large {
+            padding: 20px;
+            font-size: 18px;
+        }
+
+        .audio-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .audio-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .audio-item:hover {
+            background: var(--border);
+        }
+
+        .audio-item.playing {
+            background: #dbeafe;
+            border: 2px solid var(--primary);
+        }
+
+        .audio-name {
+            font-size: 14px;
+            font-weight: 500;
+            word-break: break-all;
+        }
+
+        .play-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .record-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .duration-input {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .duration-input label {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        .duration-input input {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .live-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            background: #fee2e2;
+            border-radius: 10px;
+            color: var(--danger);
+            font-weight: 600;
+        }
+
+        .live-indicator.active {
+            display: flex;
+        }
+
+        .live-dot {
+            width: 12px;
+            height: 12px;
+            background: var(--danger);
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        .timer {
+            font-size: 24px;
+            font-family: monospace;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: var(--text);
+            color: white;
+            border-radius: 10px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .device-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .device-option:hover {
+            border-color: var(--primary);
+        }
+
+        .device-option.selected {
+            border-color: var(--primary);
+            background: #eef2ff;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚽 小尿尿提醒</h1>
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">連線中...</span>
+            </div>
+        </header>
+
+        <!-- Device Card -->
+        <div class="card">
+            <div class="card-title">📱 播放裝置</div>
+            <div class="device-info" id="deviceInfo">
+                <span class="device-icon" id="deviceIcon">🔊</span>
+                <div class="device-details">
+                    <h3 id="deviceName">尚未設定</h3>
+                    <p id="deviceAddress">請選擇裝置</p>
+                </div>
+            </div>
+            <button class="btn btn-outline" style="margin-top: 12px;" onclick="openDeviceModal()">
+                🔄 更換裝置
+            </button>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card">
+            <div class="card-title">⚡ 快速操作</div>
+            <div class="btn-grid">
+                <button class="btn btn-primary btn-large" onclick="startLive()" id="liveBtn">
+                    🎙️ 即時廣播
+                </button>
+                <button class="btn btn-success btn-large" onclick="startRecord()" id="recordBtn">
+                    ⏺️ 錄音播放
+                </button>
+            </div>
+
+            <div class="live-indicator" id="liveIndicator">
+                <span class="live-dot"></span>
+                <span>廣播中</span>
+                <span class="timer" id="liveTimer">00:00</span>
+            </div>
+
+            <div class="record-controls" id="recordControls" style="display: none; margin-top: 12px;">
+                <div class="duration-input">
+                    <label>錄音秒數:</label>
+                    <input type="number" id="recordDuration" value="10" min="1" max="120">
+                </div>
+                <button class="btn btn-danger" onclick="confirmRecord()">開始錄音</button>
+                <button class="btn btn-outline" onclick="cancelRecord()">取消</button>
+            </div>
+        </div>
+
+        <!-- Audio Files -->
+        <div class="card">
+            <div class="card-title">🎵 音檔列表</div>
+            <div class="audio-list" id="audioList">
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Selection Modal -->
+    <div class="modal" id="deviceModal">
+        <div class="modal-content">
+            <div class="modal-title">選擇播放裝置</div>
+            <div class="device-list" id="deviceList">
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+            <div class="btn-grid">
+                <button class="btn btn-outline" onclick="closeDeviceModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveDevice()" id="saveDeviceBtn" disabled>確認</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let currentDevice = null;
+        let selectedDevice = null;
+        let isLive = false;
+        let liveStartTime = null;
+        let liveTimerInterval = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfig();
+            loadAudioFiles();
+        });
+
+        // Toast notification
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Load current config
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+
+                if (data.device) {
+                    currentDevice = data.device;
+                    updateDeviceDisplay();
+                    updateStatus('online', currentDevice.name);
+                } else {
+                    updateStatus('offline', '尚未設定裝置');
+                }
+            } catch (err) {
+                updateStatus('offline', '連線失敗');
+            }
+        }
+
+        // Update device display
+        function updateDeviceDisplay() {
+            if (currentDevice) {
+                document.getElementById('deviceIcon').textContent =
+                    currentDevice.protocol === 'airplay' ? '🍎' : '🔊';
+                document.getElementById('deviceName').textContent = currentDevice.name;
+                document.getElementById('deviceAddress').textContent =
+                    `${currentDevice.protocol === 'airplay' ? 'AirPlay' : 'Google Cast'} • ${currentDevice.address}`;
+            }
+        }
+
+        // Update status badge
+        function updateStatus(status, text) {
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            dot.className = 'status-dot';
+            if (status === 'offline') dot.classList.add('offline');
+            if (status === 'busy') dot.classList.add('busy');
+
+            statusText.textContent = text;
+        }
+
+        // Load audio files
+        async function loadAudioFiles() {
+            try {
+                const res = await fetch('/api/audio-files');
+                const files = await res.json();
+
+                const list = document.getElementById('audioList');
+
+                if (files.length === 0) {
+                    list.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📂</div>
+                            <p>沒有音檔</p>
+                            <p style="font-size: 12px;">請將音檔放入 audio/ 資料夾</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                list.innerHTML = files.map(file => `
+                    <div class="audio-item" data-file="${file}">
+                        <span class="audio-name">🎵 ${file}</span>
+                        <button class="play-btn" onclick="playAudio('${file}')">▶</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                showToast('載入音檔失敗');
+            }
+        }
+
+        // Play audio file
+        async function playAudio(filename) {
+            if (!currentDevice) {
+                showToast('請先設定播放裝置');
+                return;
+            }
+
+            showToast(`播放 ${filename}`);
+            startTimer('播放中');
+            updateStatus('busy', '📡 播放中 00:00');
+
+            // Update status with elapsed time
+            const playTimerInterval = setInterval(() => {
+                updateStatus('busy', `📡 播放中 ${formatTime(elapsedSeconds)}`);
+            }, 1000);
+
+            try {
+                const res = await fetch('/api/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('✅ 播放完成！');
+                } else {
+                    showToast(data.error || '播放失敗');
+                }
+            } catch (err) {
+                showToast('播放失敗');
+            } finally {
+                clearInterval(playTimerInterval);
+                stopTimer();
+                updateStatus('online', currentDevice.name);
+            }
+        }
+
+        // Start live broadcast
+        async function startLive() {
+            if (!currentDevice) {
+                showToast('請先設定播放裝置');
+                return;
+            }
+
+            if (isLive) {
+                // Stop live
+                try {
+                    await fetch('/api/live/stop', { method: 'POST' });
+                    stopLiveUI();
+                } catch (err) {
+                    showToast('停止廣播失敗');
+                }
+                return;
+            }
+
+            // Start live
+            updateStatus('busy', '啟動廣播中...');
+
+            try {
+                const res = await fetch('/api/live/start', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    startLiveUI();
+                } else {
+                    showToast(data.error || '啟動失敗');
+                    updateStatus('online', currentDevice.name);
+                }
+            } catch (err) {
+                showToast('啟動廣播失敗');
+                updateStatus('online', currentDevice.name);
+            }
+        }
+
+        function startLiveUI() {
+            isLive = true;
+            liveStartTime = Date.now();
+
+            document.getElementById('liveBtn').textContent = '⏹️ 停止廣播';
+            document.getElementById('liveBtn').classList.remove('btn-primary');
+            document.getElementById('liveBtn').classList.add('btn-danger');
+            document.getElementById('liveIndicator').classList.add('active');
+            document.getElementById('recordBtn').disabled = true;
+
+            updateStatus('busy', '廣播中');
+
+            liveTimerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - liveStartTime) / 1000);
+                const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const secs = (elapsed % 60).toString().padStart(2, '0');
+                document.getElementById('liveTimer').textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function stopLiveUI() {
+            isLive = false;
+            clearInterval(liveTimerInterval);
+
+            document.getElementById('liveBtn').textContent = '🎙️ 即時廣播';
+            document.getElementById('liveBtn').classList.remove('btn-danger');
+            document.getElementById('liveBtn').classList.add('btn-primary');
+            document.getElementById('liveIndicator').classList.remove('active');
+            document.getElementById('recordBtn').disabled = false;
+
+            updateStatus('online', currentDevice.name);
+            showToast('廣播已停止');
+        }
+
+        // Record
+        function startRecord() {
+            document.getElementById('recordControls').style.display = 'flex';
+            document.getElementById('recordBtn').style.display = 'none';
+        }
+
+        function cancelRecord() {
+            document.getElementById('recordControls').style.display = 'none';
+            document.getElementById('recordBtn').style.display = '';
+        }
+
+        let timerInterval = null;
+        let elapsedSeconds = 0;
+
+        function startTimer(label) {
+            elapsedSeconds = 0;
+            document.getElementById('liveIndicator').classList.add('active');
+            document.getElementById('liveIndicator').querySelector('span:nth-child(2)').textContent = label;
+            document.getElementById('liveTimer').textContent = '00:00';
+            document.getElementById('liveBtn').disabled = true;
+            document.getElementById('recordBtn').disabled = true;
+
+            timerInterval = setInterval(() => {
+                elapsedSeconds++;
+                document.getElementById('liveTimer').textContent = formatTime(elapsedSeconds);
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            document.getElementById('liveIndicator').classList.remove('active');
+            document.getElementById('liveIndicator').querySelector('span:nth-child(2)').textContent = '廣播中';
+            document.getElementById('liveBtn').disabled = false;
+            document.getElementById('recordBtn').disabled = false;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            return `${mins}:${secs}`;
+        }
+
+        async function confirmRecord() {
+            if (!currentDevice) {
+                showToast('請先設定播放裝置');
+                return;
+            }
+
+            const duration = parseInt(document.getElementById('recordDuration').value) || 10;
+
+            cancelRecord();
+            showToast(`開始錄音 ${duration} 秒`);
+
+            // Recording countdown phase
+            let remaining = duration;
+            document.getElementById('liveIndicator').classList.add('active');
+            document.getElementById('liveIndicator').querySelector('span:nth-child(2)').textContent = '錄音中';
+            document.getElementById('liveTimer').textContent = formatTime(remaining);
+            document.getElementById('liveBtn').disabled = true;
+            document.getElementById('recordBtn').disabled = true;
+            updateStatus('busy', `🎙️ 錄音中 ${remaining} 秒`);
+
+            // Countdown during recording
+            const countdownInterval = setInterval(() => {
+                remaining--;
+                if (remaining > 0) {
+                    document.getElementById('liveTimer').textContent = formatTime(remaining);
+                    updateStatus('busy', `🎙️ 錄音中 ${remaining} 秒`);
+                } else {
+                    // Recording done, switch to playback mode
+                    clearInterval(countdownInterval);
+                    document.getElementById('liveIndicator').querySelector('span:nth-child(2)').textContent = '播放中';
+                    updateStatus('busy', '📡 播放中...');
+                    elapsedSeconds = 0;
+
+                    // Start counting up for playback
+                    timerInterval = setInterval(() => {
+                        elapsedSeconds++;
+                        document.getElementById('liveTimer').textContent = formatTime(elapsedSeconds);
+                        updateStatus('busy', `📡 播放中 ${formatTime(elapsedSeconds)}`);
+                    }, 1000);
+                }
+            }, 1000);
+
+            try {
+                const res = await fetch('/api/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ duration })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('✅ 完成！可以繼續下一輪');
+                    loadAudioFiles();
+                } else {
+                    showToast(data.error || '錄音失敗');
+                }
+            } catch (err) {
+                showToast('錄音失敗');
+            } finally {
+                clearInterval(countdownInterval);
+                stopTimer();
+                updateStatus('online', currentDevice.name);
+            }
+        }
+
+        // Device modal
+        async function openDeviceModal() {
+            document.getElementById('deviceModal').classList.add('show');
+            document.getElementById('deviceList').innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            `;
+            document.getElementById('saveDeviceBtn').disabled = true;
+            selectedDevice = null;
+
+            try {
+                const res = await fetch('/api/devices');
+                const devices = await res.json();
+
+                if (devices.length === 0) {
+                    document.getElementById('deviceList').innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📡</div>
+                            <p>找不到裝置</p>
+                            <p style="font-size: 12px;">請確認裝置已開啟</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                document.getElementById('deviceList').innerHTML = devices.map((device, idx) => `
+                    <div class="device-option" data-idx="${idx}" onclick="selectDevice(${idx}, this)">
+                        <span style="font-size: 24px;">${device.protocol === 'airplay' ? '🍎' : '🔊'}</span>
+                        <div>
+                            <div style="font-weight: 600;">${device.name}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">
+                                ${device.protocol === 'airplay' ? 'AirPlay' : 'Google Cast'} • ${device.address}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                window._devices = devices;
+            } catch (err) {
+                document.getElementById('deviceList').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <p>掃描失敗</p>
+                    </div>
+                `;
+            }
+        }
+
+        function selectDevice(idx, el) {
+            document.querySelectorAll('.device-option').forEach(e => e.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedDevice = window._devices[idx];
+            document.getElementById('saveDeviceBtn').disabled = false;
+        }
+
+        async function saveDevice() {
+            if (!selectedDevice) return;
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(selectedDevice)
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    currentDevice = selectedDevice;
+                    updateDeviceDisplay();
+                    updateStatus('online', currentDevice.name);
+                    showToast('裝置已儲存');
+                    closeDeviceModal();
+                } else {
+                    showToast(data.error || '儲存失敗');
+                }
+            } catch (err) {
+                showToast('儲存失敗');
+            }
+        }
+
+        function closeDeviceModal() {
+            document.getElementById('deviceModal').classList.remove('show');
+        }
+
+        // Close modal on backdrop click
+        document.getElementById('deviceModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('deviceModal')) {
+                closeDeviceModal();
+            }
+        });
+    </script>
+</body>
+</html>
+"""
 
 
 def record_audio(duration: int = 10, sample_rate: int = 44100) -> Path:
@@ -250,7 +1145,6 @@ class GoogleCastStreamer(Streamer):
                 return
 
             # Start a simple HTTP server to serve the audio file
-            port = 8765
             audio_dir = audio_file.parent.resolve()
 
             class Handler(http.server.SimpleHTTPRequestHandler):
@@ -260,7 +1154,25 @@ class GoogleCastStreamer(Streamer):
                 def log_message(self, format, *args):
                     pass  # Suppress logging
 
-            server = http.server.HTTPServer(("0.0.0.0", port), Handler)
+            # Create server with SO_REUSEADDR to avoid "Address already in use"
+            class ReuseAddrHTTPServer(http.server.HTTPServer):
+                allow_reuse_address = True
+
+            # Try to find an available port
+            port = 8765
+            server = None
+            for p in range(8765, 8775):
+                try:
+                    server = ReuseAddrHTTPServer(("0.0.0.0", p), Handler)
+                    port = p
+                    break
+                except OSError:
+                    continue
+
+            if server is None:
+                print("❌ Could not find an available port for HTTP server.")
+                return
+
             server.timeout = 1  # Allow checking stop_event
 
             def serve():
@@ -451,12 +1363,19 @@ class LiveBroadcaster:
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
 
-        site = web.TCPSite(self._runner, "0.0.0.0", self.port)
-        await site.start()
-
+        # Try to find an available port
         local_ip = self._get_local_ip()
-        stream_url = f"http://{local_ip}:{self.port}/live.mp3"
-        return stream_url
+        for port in range(self.port, self.port + 10):
+            try:
+                site = web.TCPSite(self._runner, "0.0.0.0", port)
+                await site.start()
+                self.port = port
+                stream_url = f"http://{local_ip}:{port}/live.mp3"
+                return stream_url
+            except OSError:
+                continue
+
+        raise OSError("Could not find an available port for live broadcast")
 
     async def stop_server(self) -> None:
         """Stop the HTTP streaming server."""
@@ -809,6 +1728,273 @@ def select_audio_file(files: list[Path]) -> Path | None:
             print("❌ Please enter a number.")
 
 
+# ============================================================================
+# Web Server
+# ============================================================================
+
+
+class WebServer:
+    """Web GUI server for controlling the audio streamer."""
+
+    def __init__(self, port: int = WEB_PORT):
+        self.port = port
+        self.app = web.Application()
+        self.runner: web.AppRunner | None = None
+        self.live_broadcaster: LiveBroadcaster | None = None
+        self.live_task: asyncio.Task | None = None
+        self._setup_routes()
+
+    def _setup_routes(self):
+        """Setup API routes."""
+        self.app.router.add_get("/", self._handle_index)
+        self.app.router.add_get("/api/config", self._handle_get_config)
+        self.app.router.add_post("/api/config", self._handle_save_config)
+        self.app.router.add_get("/api/devices", self._handle_discover_devices)
+        self.app.router.add_get("/api/audio-files", self._handle_list_audio)
+        self.app.router.add_post("/api/stream", self._handle_stream)
+        self.app.router.add_post("/api/record", self._handle_record)
+        self.app.router.add_post("/api/live/start", self._handle_live_start)
+        self.app.router.add_post("/api/live/stop", self._handle_live_stop)
+
+    def _get_local_ip(self) -> str:
+        """Get local IP address."""
+        import socket
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "localhost"
+
+    async def _handle_index(self, request: web.Request) -> web.Response:
+        """Serve the main HTML page."""
+        return web.Response(text=WEB_HTML, content_type="text/html")
+
+    async def _handle_get_config(self, request: web.Request) -> web.Response:
+        """Get current device configuration."""
+        config = load_config()
+        if config:
+            return web.json_response(config)
+        return web.json_response({})
+
+    async def _handle_save_config(self, request: web.Request) -> web.Response:
+        """Save device configuration."""
+        try:
+            data = await request.json()
+            save_config(
+                device_id=data.get("id", ""),
+                device_name=data.get("name", ""),
+                device_address=data.get("address", ""),
+                protocol=data.get("protocol", "googlecast"),
+                credentials=data.get("credentials"),
+            )
+            return web.json_response({"success": True})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def _handle_discover_devices(self, request: web.Request) -> web.Response:
+        """Discover available devices."""
+        try:
+            devices = await discover_all_devices(timeout=5)
+            device_list = [
+                {
+                    "id": d.id,
+                    "name": d.name,
+                    "address": d.address,
+                    "protocol": d.protocol,
+                }
+                for d in devices
+            ]
+            return web.json_response(device_list)
+        except Exception:
+            return web.json_response([])
+
+    async def _handle_list_audio(self, request: web.Request) -> web.Response:
+        """List available audio files."""
+        files = list_audio_files()
+        # Filter out hidden files and recording file
+        file_names = [
+            f.name
+            for f in files
+            if not f.name.startswith("_") and not f.name.startswith(".")
+        ]
+        return web.json_response(file_names)
+
+    async def _handle_stream(self, request: web.Request) -> web.Response:
+        """Stream an audio file to the configured device."""
+        try:
+            data = await request.json()
+            filename = data.get("filename")
+
+            if not filename:
+                return web.json_response({"success": False, "error": "No filename"})
+
+            audio_file = AUDIO_DIR / filename
+            if not audio_file.exists():
+                return web.json_response({"success": False, "error": "File not found"})
+
+            config = load_config()
+            if not config:
+                return web.json_response(
+                    {"success": False, "error": "No device configured"}
+                )
+
+            # Run streaming in background
+            await stream_audio(config, audio_file)
+            return web.json_response({"success": True})
+
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def _handle_record(self, request: web.Request) -> web.Response:
+        """Record audio and stream it."""
+        try:
+            data = await request.json()
+            duration = data.get("duration", 10)
+
+            config = load_config()
+            if not config:
+                return web.json_response(
+                    {"success": False, "error": "No device configured"}
+                )
+
+            # Run in executor since record_audio is blocking
+            loop = asyncio.get_event_loop()
+            audio_file = await loop.run_in_executor(None, record_audio, duration)
+
+            # Stream the recording
+            await stream_audio(config, audio_file)
+            return web.json_response({"success": True})
+
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def _handle_live_start(self, request: web.Request) -> web.Response:
+        """Start live broadcast."""
+        try:
+            if self.live_broadcaster and self.live_broadcaster.broadcasting:
+                return web.json_response(
+                    {"success": False, "error": "Already broadcasting"}
+                )
+
+            config = load_config()
+            if not config:
+                return web.json_response(
+                    {"success": False, "error": "No device configured"}
+                )
+
+            device_id = config["device"]["id"]
+            device_name = config["device"]["name"]
+            protocol = config["device"].get("protocol", "airplay")
+            credentials = config["device"].get("credentials")
+
+            device = await find_device_by_id(device_id, protocol)
+            if not device:
+                device = await find_device_by_id(device_name, protocol)
+
+            if not device:
+                return web.json_response(
+                    {"success": False, "error": "Device not found"}
+                )
+
+            if protocol == "airplay" and not credentials:
+                return web.json_response({"success": False, "error": "No credentials"})
+
+            # Start broadcaster in background task
+            self.live_broadcaster = LiveBroadcaster(
+                port=8766
+            )  # Different port than web
+
+            async def run_broadcast():
+                try:
+                    await self.live_broadcaster.broadcast(device, credentials)
+                except Exception as e:
+                    print(f"❌ Broadcast error: {e}")
+
+            self.live_task = asyncio.create_task(run_broadcast())
+
+            # Wait a bit for it to start
+            await asyncio.sleep(1)
+
+            if self.live_broadcaster.broadcasting:
+                return web.json_response({"success": True})
+            else:
+                return web.json_response({"success": False, "error": "Failed to start"})
+
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def _handle_live_stop(self, request: web.Request) -> web.Response:
+        """Stop live broadcast."""
+        try:
+            if self.live_broadcaster:
+                self.live_broadcaster.broadcasting = False
+                if self.live_task:
+                    self.live_task.cancel()
+                    try:
+                        await self.live_task
+                    except asyncio.CancelledError:
+                        pass
+                self.live_broadcaster = None
+                self.live_task = None
+
+            return web.json_response({"success": True})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def start(self):
+        """Start the web server."""
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+
+        site = web.TCPSite(self.runner, "0.0.0.0", self.port)
+        await site.start()
+
+        local_ip = self._get_local_ip()
+        print(f"""
+🌐 Web GUI Started!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📱 From phone:  http://{local_ip}:{self.port}
+  💻 From this computer:  http://localhost:{self.port}
+
+Press Ctrl+C to stop.
+""")
+
+    async def stop(self):
+        """Stop the web server."""
+        if self.live_broadcaster:
+            self.live_broadcaster.broadcasting = False
+        if self.live_task:
+            self.live_task.cancel()
+        if self.runner:
+            await self.runner.cleanup()
+
+
+async def run_web_server():
+    """Run the web server."""
+    import os
+    import signal
+
+    server = WebServer()
+    await server.start()
+
+    # Force exit on Ctrl+C
+    def force_exit(sig, frame):
+        print("\n⏹️  Server stopped.")
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, force_exit)
+    signal.signal(signal.SIGTERM, force_exit)
+
+    # Keep running forever
+    while True:
+        await asyncio.sleep(3600)
+
+
 def print_usage():
     """Print usage information."""
     print("""
@@ -817,6 +2003,7 @@ Audio Streamer (AirPlay + Google Cast)
 
 Usage:
   python main.py              # Stream audio (setup if needed)
+  python main.py --web        # Start web GUI (access from phone!)
   python main.py --setup      # Force device setup
   python main.py --pair       # Pair with device (AirPlay only)
   python main.py --list       # List available devices
@@ -839,6 +2026,11 @@ async def main():
     # Handle --help
     if "--help" in args or "-h" in args:
         print_usage()
+        return
+
+    # Handle --web
+    if "--web" in args:
+        await run_web_server()
         return
 
     # Handle --list

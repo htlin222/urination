@@ -1,13 +1,17 @@
-.PHONY: help live record audio config setup pair list
+.PHONY: help web live record audio config setup pair list
 
 help:
 	@echo "Usage:"
+	@echo "  make web      - Start web GUI (access from phone!)"
 	@echo "  make live     - Start live broadcast from microphone"
 	@echo "  make record   - Record 10s from mic and stream"
 	@echo "  make audio    - Stream audio file (interactive selection)"
 	@echo "  make config   - Setup/configure device"
 	@echo "  make pair     - Pair with AirPlay device"
 	@echo "  make list     - List available devices"
+
+web:
+	uv run python main.py --web
 
 live:
 	uv run python main.py --live
